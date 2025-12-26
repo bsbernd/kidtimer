@@ -6,6 +6,7 @@
 #LANG="en_US.UTF-8" #unremark to change preferred language.
 basedir="/usr/local/kidtimer"
 configdir="/etc/kidtimer"
+SHUTDOWN_BASE="/var/run/kidtimer.shutdown"
 Cdate=`/bin/date +%Y-%m-%d`
 TUI=0
 HOUR=`/bin/date +%H`
@@ -160,13 +161,13 @@ go_clean_jobs () {
     #        /usr/bin/at -c $job | /bin/grep -q "bash.$user"
     #        [ $? -eq 0 ] && /usr/bin/at -d $job
     done
-    [ -e /tmp/kidtimer.shutdown.$user ] && /bin/rm -rf /tmp/kidtimer.shutdown.$user
-    [ -e /tmp/kidtimer.send1.bash.$user ] && /bin/rm -rf /tmp/kidtimer.send1.bash.$user
-    [ -e /tmp/kidtimer.send2.bash.$user ] && /bin/rm -rf /tmp/kidtimer.send2.bash.$user
-    [ -e /tmp/kidtimer.send3.bash.$user ] && /bin/rm -rf /tmp/kidtimer.send3.bash.$user
-    [ -e /tmp/kidtimer.send4.bash.$user ] && /bin/rm -rf /tmp/kidtimer.send4.bash.$user
-    [ -e /tmp/kidtimer.send5.bash.$user ] && /bin/rm -rf /tmp/kidtimer.send5.bash.$user
-[ -e /tmp/killall.bash.$user ] && /bin/rm -rf /tmp/killall.bash.$user
+    [ -e ${SHUTDOWN_BASE}.${user} ] && /bin/rm -rf ${SHUTDOWN_BASE}.${user}
+    [ -e /tmp/kidtimer.send1.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send1.bash.${user}
+    [ -e /tmp/kidtimer.send2.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send2.bash.${user}
+    [ -e /tmp/kidtimer.send3.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send3.bash.${user}
+    [ -e /tmp/kidtimer.send4.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send4.bash.${user}
+    [ -e /tmp/kidtimer.send5.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send5.bash.${user}
+    [ -e /tmp/killall.bash.${user} ] && /bin/rm -rf /tmp/killall.bash.${user}
 }
 
 
@@ -252,7 +253,7 @@ go_hourly () {
                     /usr/bin/users | /bin/grep -q $kid
                     if [ $? -eq 0 ]; then
                         # %%% if this file exists, do no issue logout sequence
-                        if [ ! -e /tmp/kidtimer.shutdown.$kid ]; then
+                        if [ ! -e ${SHUTDOWN_BASE}.${kid} ]; then
                             go_logout $kid
                         fi
                     fi
@@ -272,7 +273,7 @@ go_recheck_logout () {
     # Check if user is still logged in
     /usr/bin/users | /bin/grep -q $kid
     if [ $? -ne 0 ]; then
-        /bin/rm -rf /tmp/kidtimer.shutdown.$kid
+        /bin/rm -rf ${SHUTDOWN_BASE}.${kid}
         go_clean_jobs $kid
         return 0
     fi
@@ -295,7 +296,7 @@ go_recheck_logout () {
 
     # Cancel shutdown if time is sufficient and user is allowed
     if [ $min -gt 5 ] && [ $allowed -eq 1 ]; then
-        /bin/rm -rf /tmp/kidtimer.shutdown.$kid
+        /bin/rm -rf ${SHUTDOWN_BASE}.${kid}
         go_clean_jobs $kid
         return 0
     fi
@@ -313,14 +314,14 @@ go_logout () {
     fi
 
     # schedule the shutdown if we haven't already
-    if [ ! -e /tmp/kidtimer.shutdown.$kid ]; then
+    if [ ! -e ${SHUTDOWN_BASE}.${kid} ]; then
         go_send $kid 5
         go_recheck_logout $kid || go_send $kid 4
         go_recheck_logout $kid || go_send $kid 3
         go_recheck_logout $kid || go_send $kid 2
         go_recheck_logout $kid || go_send $kid 1
         go_recheck_logout $kid || go_killall $kid
-        /usr/bin/touch /tmp/kidtimer.shutdown.$kid
+        /usr/bin/touch ${SHUTDOWN_BASE}.${kid}
     fi
 }
 
@@ -409,11 +410,11 @@ go_killall () {
     #
     # should do gnome-screensaver-command -l and passwd -l here
     # if user hibernates first and resumes, logic will continue up resumption
-    echo "/bin/rm -rf /tmp/kidtimer.shutdown.$user" >> /tmp/killall.bash.$user
-    echo "/bin/rm -f /tmp/killall.bash.$user" >> /tmp/killall.bash.$user
+    echo "/bin/rm -rf ${SHUTDOWN_BASE}.${user}" >> /tmp/killall.bash.${user}
+    echo "/bin/rm -f /tmp/killall.bash.${user}" >> /tmp/killall.bash.${user}
     #echo "/usr/bin/pkill -KILL -u $user" >> /tmp/killall.bash.$user
-    echo "/usr/sbin/pm-hibernate" >> /tmp/killall.bash.$user
-    echo "/bin/bash /tmp/killall.bash.$user" | /usr/bin/at now + 6 minutes
+    echo "/usr/sbin/pm-hibernate" >> /tmp/killall.bash.${user}
+    echo "/bin/bash /tmp/killall.bash.${user}" | /usr/bin/at now + 6 minutes
 }
 
 
