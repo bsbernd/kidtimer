@@ -263,6 +263,46 @@ go_hourly () {
 }
 
 
+go_recheck_logout () {
+    local kid=$1
+    local min
+    local allowed
+    local schedule_result
+
+    # Check if user is still logged in
+    /usr/bin/users | /bin/grep -q $kid
+    if [ $? -ne 0 ]; then
+        /bin/rm -rf /tmp/kidtimer.shutdown.$kid
+        go_clean_jobs $kid
+        return 0
+    fi
+
+    # Recheck time and schedule
+    min=0
+    [ -e $basedir/time/$kid.ttl ] && min=`/bin/cat $basedir/time/$kid.ttl`
+
+    allowed=1
+    if [ -e $basedir/schedule/$kid ]; then
+        local HOUR=`/bin/date +%H`
+        local DOW=`/bin/date +%u`
+        local WEEKEND="no"
+        [ "$DOW" == "6" ] && WEEKEND="yes"
+        [ "$DOW" == "7" ] && WEEKEND="yes"
+        [ "$WEEKEND" == "no" ] && schedule_result=`/bin/grep ^$HOUR $basedir/schedule/$kid | /usr/bin/awk '{ print $2 }'`
+        [ "$WEEKEND" == "yes" ] && schedule_result=`/bin/grep ^$HOUR $basedir/schedule/$kid | /usr/bin/awk '{ print $3 }'`
+        [ "$schedule_result" != "y" ] && allowed=0
+    fi
+
+    # Cancel shutdown if time is sufficient and user is allowed
+    if [ $min -gt 5 ] && [ $allowed -eq 1 ]; then
+        /bin/rm -rf /tmp/kidtimer.shutdown.$kid
+        go_clean_jobs $kid
+        return 0
+    fi
+
+    return 1
+}
+
 go_logout () {
     local kid=$1
 
@@ -275,11 +315,11 @@ go_logout () {
     # schedule the shutdown if we haven't already
     if [ ! -e /tmp/kidtimer.shutdown.$kid ]; then
         go_send $kid 5
-        go_send $kid 4
-        go_send $kid 3
-        go_send $kid 2
-        go_send $kid 1
-        go_killall $kid
+        go_recheck_logout $kid || go_send $kid 4
+        go_recheck_logout $kid || go_send $kid 3
+        go_recheck_logout $kid || go_send $kid 2
+        go_recheck_logout $kid || go_send $kid 1
+        go_recheck_logout $kid || go_killall $kid
         /usr/bin/touch /tmp/kidtimer.shutdown.$kid
     fi
 }
@@ -578,7 +618,6 @@ go_help () {
     echo "logout <user> ... Starts logout sequence for user."
     echo "hourly ... Enables/disables user access based on the schedule."
     echo "daily ... Resets time for the new day."
-    echo "update ... Updates kidtimer to the latest version."
     echo "info ... Gather local configurations to troubleshoot issues."
     echo "help ... This list."
     echo "--------------------------------------------------------------------------------"
