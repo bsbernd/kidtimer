@@ -141,7 +141,7 @@ go_check () {
 
             # check time, lock account, and start stutdown procedure, queue up jobs
             if [ $min -le 5 ] || [ $allowed -eq 0 ]; then
-                go_logout $kid
+                go_logout_async $kid
             fi
         fi
     done
@@ -266,7 +266,7 @@ go_hourly () {
                     if [ $? -eq 0 ]; then
                         # %%% if this file exists, do no issue logout sequence
                         if [ ! -e ${SHUTDOWN_BASE}.${kid} ]; then
-                            go_logout $kid
+                            go_logout $kid 1
                         fi
                     fi
                 fi
@@ -316,7 +316,8 @@ go_recheck_logout () {
     return 1
 }
 
-go_logout () {
+# Async logout for cron - schedules jobs via at and returns immediately
+go_logout_async () {
     local kid=$1
 
     # only start this if they are logged in
@@ -328,13 +329,45 @@ go_logout () {
     # schedule the shutdown if we haven't already
     if [ ! -e ${SHUTDOWN_BASE}.${kid} ]; then
         go_send $kid 5
-        go_recheck_logout $kid || go_send $kid 4
-        go_recheck_logout $kid || go_send $kid 3
-        go_recheck_logout $kid || go_send $kid 2
-        go_recheck_logout $kid || go_send $kid 1
-        go_recheck_logout $kid || go_killall $kid
+        go_send $kid 4
+        go_send $kid 3
+        go_send $kid 2
+        go_send $kid 1
+        go_killall_async $kid
         /usr/bin/touch ${SHUTDOWN_BASE}.${kid}
     fi
+}
+
+# Sync logout for manual command - runs directly with sleep
+go_logout_sync () {
+    local kid=$1
+    local time
+
+    # only start this if they are logged in
+    /usr/bin/users | /bin/grep -q $kid
+    if [ $? -ne 0 ]; then
+        return
+    fi
+
+    # Clean up old state and force new sequence
+    if [ -e ${SHUTDOWN_BASE}.${kid} ]; then
+        /bin/rm -rf ${SHUTDOWN_BASE}.${kid}
+        go_clean_jobs $kid
+    fi
+
+    /usr/bin/touch ${SHUTDOWN_BASE}.${kid}
+
+    for time in 5 4 3 2 1; do
+        go_send_sync $kid $time
+
+        if [ $time -gt 1 ]; then
+            /bin/sleep 60
+        fi
+    done
+
+    /bin/sleep 60
+
+    go_killall $kid
 }
 
 
@@ -366,74 +399,173 @@ play_sound () {
 }
 
 
+# Creates the notification script, returns path in SEND_SCRIPT
+# $1 = user, $2 = time, $3 = recheck (1=yes, 0=no)
+create_send_script () {
+    local user=$1
+    local time=$2
+    local recheck=$3
+    local line=$((7-$time))
+    local text=$((6-$time))
+    SEND_SCRIPT="/tmp/kidtimer.send$time.bash.$user"
+
+    /bin/rm -f $SEND_SCRIPT
+
+    cat > $SEND_SCRIPT << 'EOF'
+#!/bin/bash
+user="@@USER@@"
+text="@@TEXT@@"
+line="@@LINE@@"
+TMPFILE="@@TMPFILE@@"
+recheck="@@RECHECK@@"
+basedir="/usr/local/kidtimer"
+LANG="${LANG:-en_US.UTF-8}"
+
+# Recheck if logout is still needed
+if [ "$recheck" -eq 1 ]; then
+    /usr/local/bin/kidtimer recheck ${user}
+    if [ $? -eq 0 ]; then
+        /bin/rm -f $TMPFILE
+        exit 0
+    fi
+fi
+
+# Build message
+if [ -e $basedir/locale/$LANG ]; then
+    MSG="$user: $(/bin/sed -n "${line}p" $basedir/locale/$LANG)"
+else
+    MSG="$user's computer time will end in $text minutes."
+fi
+
+# Send notification to all displays
+for (( display = 0 ; display < 10 ; display++ )); do
+    /bin/su $user -c "DISPLAY=:$display /usr/bin/notify-send -i $basedir/icons/kidtimer-$text.png \"ALERT\" \"$MSG\"" 2>/dev/null
+done
+
+# Play sound
+SOUND_PLAYER=""
+SOUND_FILE=""
+
+if [ -x /usr/bin/paplay ]; then
+    SOUND_PLAYER="/usr/bin/paplay"
+elif [ -x /usr/bin/pw-play ]; then
+    SOUND_PLAYER="/usr/bin/pw-play"
+elif [ -x /usr/bin/aplay ]; then
+    SOUND_PLAYER="/usr/bin/aplay"
+fi
+
+if [ -f /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
+elif [ -f /usr/share/sounds/freedesktop/stereo/bell.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/bell.oga"
+elif [ -f /usr/share/sounds/freedesktop/stereo/dialog-warning.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/dialog-warning.oga"
+fi
+
+if [ -n "${SOUND_PLAYER}" ] && [ -n "${SOUND_FILE}" ]; then
+    /bin/su $user -c "${SOUND_PLAYER} ${SOUND_FILE} &" 2>/dev/null
+fi
+
+/bin/rm -f $TMPFILE
+EOF
+
+    # Replace placeholders
+    /bin/sed -i "s|@@USER@@|${user}|g" $SEND_SCRIPT
+    /bin/sed -i "s|@@TEXT@@|${text}|g" $SEND_SCRIPT
+    /bin/sed -i "s|@@LINE@@|${line}|g" $SEND_SCRIPT
+    /bin/sed -i "s|@@TMPFILE@@|${SEND_SCRIPT}|g" $SEND_SCRIPT
+    /bin/sed -i "s|@@RECHECK@@|${recheck}|g" $SEND_SCRIPT
+
+    chmod +x $SEND_SCRIPT
+}
+
+# Async - schedules notification via at
 go_send () {
     local user=$1
     local time=$2
-    local line=$((7-$time))
-    local text=$((6-$time))
-    local TMPFILE="/tmp/kidtimer.send$time.bash.$user"
-    local MSG
-    local display
 
-    /bin/rm -f $TMPFILE
-    touch $TMPFILE
-    chmod +x $TMPFILE
-
-    echo "#!/bin/bash" > $TMPFILE
-
-    # This method to determine the correct display doesn't work, at least on zorin.
-    # It only seems to detect a user who has an active shell running
-    #D=`/usr/bin/who | grep $user | grep -m1 "(:" | cut -d\( -f2 | sed s/\)// | sed s/://`
-
-    # So instead I'll just send the message to all the first 10 displays, and the ones owned by the correct user will show the message, the rest won't
-    if [ -e $basedir/locale/$LANG ]; then
-        MSG="$user: `/bin/sed -n "$line"p /usr/local/kidtimer/locale/$LANG`"
-    else
-        MSG="$user's computer time will end in $text minutes."
-    fi
-
-    for (( display = 0 ; display < 10 ; display = display + 1 )); do
-        echo "/bin/su $user -c 'DISPLAY=:$display /usr/bin/notify-send -i /usr/local/kidtimer/icons/kidtimer-$text.png \
-        \"ALERT\" \"$MSG\"'" >> $TMPFILE
-    done
-
-    play_sound $user $TMPFILE
-
-    echo "/bin/rm -f $TMPFILE" >> $TMPFILE
-    echo "/bin/bash $TMPFILE" | /usr/bin/at now + $time minutes
+    create_send_script $user $time 1
+    echo "/bin/bash $SEND_SCRIPT" | /usr/bin/at now + $time minutes
     # Note you need the file /var/spool/cron/atjobs/.SEQ owned by daemon:daemon for at to work properly!!!
 }
 
+# Sync - executes notification immediately
+go_send_sync () {
+    local user=$1
+    local time=$2
 
+    create_send_script $user $time 0
+    /bin/bash $SEND_SCRIPT
+}
+
+
+# Creates the kill script, returns path in KILL_SCRIPT
+# $1 = user, $2 = recheck (1=yes, 0=no)
+create_kill_script () {
+    local user=$1
+    local recheck=$2
+    KILL_SCRIPT="${KILLALL_BASE}.${user}"
+
+    /bin/rm -f $KILL_SCRIPT
+
+    cat > $KILL_SCRIPT << 'EOF'
+#!/bin/bash
+user="@@USER@@"
+recheck="@@RECHECK@@"
+SHUTDOWN_BASE="/var/run/kidtimer.shutdown"
+KILLALL_BASE="/var/run/kidtimer.killall"
+KILL_SCRIPT="@@KILL_SCRIPT@@"
+
+# Recheck if logout is still needed
+if [ "$recheck" -eq 1 ]; then
+    /usr/local/bin/kidtimer recheck ${user}
+    if [ $? -eq 0 ]; then
+        /bin/rm -f $KILL_SCRIPT
+        exit 0
+    fi
+fi
+
+# Lock the account immediately to prevent re-login
+/usr/bin/passwd ${user} -l
+
+# Lock all sessions for the user
+for session in $(/usr/bin/loginctl list-sessions --no-legend | /usr/bin/awk '{print $1}'); do
+    session_user=$(/usr/bin/loginctl show-session $session -p Name --value)
+    if [ "$session_user" == "$user" ]; then
+        /usr/bin/loginctl lock-session $session 2>/dev/null
+    fi
+done
+
+# Clean up
+/bin/rm -rf ${SHUTDOWN_BASE}.${user}
+/bin/rm -f ${KILLALL_BASE}.${user}
+
+# Hibernate
+#/usr/sbin/pm-hibernate
+EOF
+
+    # Replace placeholders
+    /bin/sed -i "s|@@USER@@|${user}|g" $KILL_SCRIPT
+    /bin/sed -i "s|@@RECHECK@@|${recheck}|g" $KILL_SCRIPT
+    /bin/sed -i "s|@@KILL_SCRIPT@@|${KILL_SCRIPT}|g" $KILL_SCRIPT
+
+    chmod +x $KILL_SCRIPT
+}
+
+# Sync - executes kill immediately
 go_killall () {
     local user=$1
 
-    # Lock the account immediately to prevent re-login
-    go_lock_account ${user}
+    create_kill_script $user 0
+    /bin/bash $KILL_SCRIPT
+}
 
-    /bin/rm -f ${KILLALL_BASE}.${user}
-    touch ${KILLALL_BASE}.${user}
-    chmod +x ${KILLALL_BASE}.${user}
+# Async - schedules kill via at
+go_killall_async () {
+    local user=$1
 
-    echo "#!/bin/bash" > ${KILLALL_BASE}.${user}
-    # Not sure if it is better or worse to do a normal kill first...
-    # Programs like Firefox will reopen all their previous tabs if it is killed with -KILL
-    # But other programs would probably do better if given a chance to save state/data and clean up after themselves eg open office???
-    #echo "/usr/bin/pkill -TERM -u $user" >> ${KILLALL_BASE}.${user}
-    #echo "/bin/sleep 5" >> ${KILLALL_BASE}.${user}
-    #
-    # Lock all sessions for the user
-    echo "for session in \$(/usr/bin/loginctl list-sessions --no-legend | /usr/bin/awk '{print \$1}'); do" >> ${KILLALL_BASE}.${user}
-    echo "    session_user=\$(/usr/bin/loginctl show-session \$session -p Name --value)" >> ${KILLALL_BASE}.${user}
-    echo "    if [ \"\$session_user\" == \"$user\" ]; then" >> ${KILLALL_BASE}.${user}
-    echo "        /usr/bin/loginctl lock-session \$session 2>/dev/null" >> ${KILLALL_BASE}.${user}
-    echo "    fi" >> ${KILLALL_BASE}.${user}
-    echo "done" >> ${KILLALL_BASE}.${user}
-    echo "/bin/rm -rf ${SHUTDOWN_BASE}.${user}" >> ${KILLALL_BASE}.${user}
-    echo "/bin/rm -f ${KILLALL_BASE}.${user}" >> ${KILLALL_BASE}.${user}
-    #echo "/usr/bin/pkill -KILL -u $user" >> ${KILLALL_BASE}.${user}
-    echo "/usr/sbin/pm-hibernate" >> ${KILLALL_BASE}.${user}
-    echo "/bin/bash ${KILLALL_BASE}.${user}" | /usr/bin/at now + 6 minutes
+    create_kill_script $user 1
+    echo "/bin/bash $KILL_SCRIPT" | /usr/bin/at now + 6 minutes
 }
 
 
@@ -694,9 +826,12 @@ reset) reset_time $KID
         ;;
 gettime) get_time
         ;;
-logout) go_logout $KID
+logout) go_logout_sync $KID
         ;;
 kill) go_killall $KID
+        ;;
+recheck) go_recheck_logout $KID
+        exit $?
         ;;
 hourly) go_hourly
         ;;
