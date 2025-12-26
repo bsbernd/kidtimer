@@ -530,9 +530,19 @@ fi
 
 # Lock all sessions for the user
 for session in $(/usr/bin/loginctl list-sessions --no-legend | /usr/bin/awk '{print $1}'); do
+    # Get the user's D-Bus session address
+    dbus_addr=$(ps e -u $user | grep -o 'DBUS_SESSION_BUS_ADDRESS=[^ ]*' | head -1)
+
+
     session_user=$(/usr/bin/loginctl show-session $session -p Name --value)
     if [ "$session_user" == "$user" ]; then
         /usr/bin/loginctl lock-session $session 2>/dev/null
+    fi
+
+    # Lock the session via D-Bus
+    if [ -n "$dbus_addr" ]; then
+        /bin/su - $user -c "$dbus_addr dbus-send --session --type=method_call --dest=org.gnome.ScreenSaver \
+            /org/gnome/ScreenSaver org.gnome.ScreenSaver.Lock" 2>/dev/null
     fi
 done
 
@@ -541,7 +551,7 @@ done
 /bin/rm -f ${KILLALL_BASE}.${user}
 
 # Hibernate
-#/usr/sbin/pm-hibernate
+/usr/sbin/pm-hibernate
 EOF
 
     # Replace placeholders
