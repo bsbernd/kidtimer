@@ -636,6 +636,7 @@ go_help () {
     echo "gettime <user> ... Prints remaining time for the day."
     echo "reset <user> ... Reset time for the day."
     echo "logout <user> ... Starts logout sequence for user."
+    echo "kill <user> ... Kills all user processes and hibernates computer."
     echo "hourly ... Enables/disables user access based on the schedule."
     echo "daily ... Resets time for the new day."
     echo "info ... Gather local configurations to troubleshoot issues."
@@ -694,6 +695,8 @@ reset) reset_time $KID
 gettime) get_time
         ;;
 logout) go_logout $KID
+        ;;
+kill) go_killall $KID
         ;;
 hourly) go_hourly
         ;;
