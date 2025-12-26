@@ -154,6 +154,16 @@ get_ttl_time () {
 }
 
 
+go_lock_account () {
+    local user=$1
+    /usr/sbin/usermod --expiredate 1 ${user}
+}
+
+go_unlock_account () {
+    local user=$1
+    /usr/sbin/usermod --expiredate "" ${user}
+}
+
 go_clean_jobs () {
     local user=$1
     local job
@@ -169,6 +179,7 @@ go_clean_jobs () {
     [ -e /tmp/kidtimer.send4.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send4.bash.${user}
     [ -e /tmp/kidtimer.send5.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send5.bash.${user}
     [ -e ${KILLALL_BASE}.${user} ] && /bin/rm -rf ${KILLALL_BASE}.${user}
+    go_unlock_account ${user}
 }
 
 
@@ -397,10 +408,12 @@ go_send () {
 go_killall () {
     local user=$1
 
+    # Lock the account immediately to prevent re-login
+    go_lock_account ${user}
+
     /bin/rm -f ${KILLALL_BASE}.${user}
     touch ${KILLALL_BASE}.${user}
     chmod +x ${KILLALL_BASE}.${user}
-    #/usr/bin/passwd $user -l
 
     echo "#!/bin/bash" > ${KILLALL_BASE}.${user}
     # Not sure if it is better or worse to do a normal kill first...
@@ -409,8 +422,13 @@ go_killall () {
     #echo "/usr/bin/pkill -TERM -u $user" >> ${KILLALL_BASE}.${user}
     #echo "/bin/sleep 5" >> ${KILLALL_BASE}.${user}
     #
-    # should do gnome-screensaver-command -l and passwd -l here
-    # if user hibernates first and resumes, logic will continue up resumption
+    # Lock all sessions for the user
+    echo "for session in \$(/usr/bin/loginctl list-sessions --no-legend | /usr/bin/awk '{print \$1}'); do" >> ${KILLALL_BASE}.${user}
+    echo "    session_user=\$(/usr/bin/loginctl show-session \$session -p Name --value)" >> ${KILLALL_BASE}.${user}
+    echo "    if [ \"\$session_user\" == \"$user\" ]; then" >> ${KILLALL_BASE}.${user}
+    echo "        /usr/bin/loginctl lock-session \$session 2>/dev/null" >> ${KILLALL_BASE}.${user}
+    echo "    fi" >> ${KILLALL_BASE}.${user}
+    echo "done" >> ${KILLALL_BASE}.${user}
     echo "/bin/rm -rf ${SHUTDOWN_BASE}.${user}" >> ${KILLALL_BASE}.${user}
     echo "/bin/rm -f ${KILLALL_BASE}.${user}" >> ${KILLALL_BASE}.${user}
     #echo "/usr/bin/pkill -KILL -u $user" >> ${KILLALL_BASE}.${user}
@@ -435,7 +453,7 @@ reset_time () {
     grep -q $KID $configdir/kid.list
     if [ $? -eq 0 ]; then
         get_ttl_time $KID > $basedir/time/$KID.ttl
-        /usr/bin/passwd $KID -u
+        go_unlock_account $KID
         go_clean_jobs $KID
         go_echo_done
     fi
@@ -463,7 +481,7 @@ go_addtime () {
             echo $current > $basedir/time/$KID.ttl
             get_time
         fi
-        /usr/bin/passwd $KID -u
+        go_unlock_account $KID
         go_clean_jobs $KID
     else
         go_echo_error
