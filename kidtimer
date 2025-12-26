@@ -7,6 +7,7 @@
 basedir="/usr/local/kidtimer"
 configdir="/etc/kidtimer"
 SHUTDOWN_BASE="/var/run/kidtimer.shutdown"
+KILLALL_BASE="/var/run/kidtimer.killall"
 Cdate=`/bin/date +%Y-%m-%d`
 TUI=0
 HOUR=`/bin/date +%H`
@@ -167,7 +168,7 @@ go_clean_jobs () {
     [ -e /tmp/kidtimer.send3.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send3.bash.${user}
     [ -e /tmp/kidtimer.send4.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send4.bash.${user}
     [ -e /tmp/kidtimer.send5.bash.${user} ] && /bin/rm -rf /tmp/kidtimer.send5.bash.${user}
-    [ -e /tmp/killall.bash.${user} ] && /bin/rm -rf /tmp/killall.bash.${user}
+    [ -e ${KILLALL_BASE}.${user} ] && /bin/rm -rf ${KILLALL_BASE}.${user}
 }
 
 
@@ -396,25 +397,25 @@ go_send () {
 go_killall () {
     local user=$1
 
-    /bin/rm -f /tmp/killall.bash.${user}
-    touch /tmp/killall.bash.${user}
-    chmod +x /tmp/killall.bash.${user}
+    /bin/rm -f ${KILLALL_BASE}.${user}
+    touch ${KILLALL_BASE}.${user}
+    chmod +x ${KILLALL_BASE}.${user}
     #/usr/bin/passwd $user -l
 
-    echo "#!/bin/bash" > /tmp/killall.bash.${user}
+    echo "#!/bin/bash" > ${KILLALL_BASE}.${user}
     # Not sure if it is better or worse to do a normal kill first...
     # Programs like Firefox will reopen all their previous tabs if it is killed with -KILL
     # But other programs would probably do better if given a chance to save state/data and clean up after themselves eg open office???
-    #echo "/usr/bin/pkill -TERM -u $user" >> /tmp/killall.bash.$user
-    #echo "/bin/sleep 5" >> /tmp/killall.bash.$user
+    #echo "/usr/bin/pkill -TERM -u $user" >> ${KILLALL_BASE}.${user}
+    #echo "/bin/sleep 5" >> ${KILLALL_BASE}.${user}
     #
     # should do gnome-screensaver-command -l and passwd -l here
     # if user hibernates first and resumes, logic will continue up resumption
-    echo "/bin/rm -rf ${SHUTDOWN_BASE}.${user}" >> /tmp/killall.bash.${user}
-    echo "/bin/rm -f /tmp/killall.bash.${user}" >> /tmp/killall.bash.${user}
-    #echo "/usr/bin/pkill -KILL -u $user" >> /tmp/killall.bash.$user
-    echo "/usr/sbin/pm-hibernate" >> /tmp/killall.bash.${user}
-    echo "/bin/bash /tmp/killall.bash.${user}" | /usr/bin/at now + 6 minutes
+    echo "/bin/rm -rf ${SHUTDOWN_BASE}.${user}" >> ${KILLALL_BASE}.${user}
+    echo "/bin/rm -f ${KILLALL_BASE}.${user}" >> ${KILLALL_BASE}.${user}
+    #echo "/usr/bin/pkill -KILL -u $user" >> ${KILLALL_BASE}.${user}
+    echo "/usr/sbin/pm-hibernate" >> ${KILLALL_BASE}.${user}
+    echo "/bin/bash ${KILLALL_BASE}.${user}" | /usr/bin/at now + 6 minutes
 }
 
 
