@@ -255,9 +255,9 @@ go_hourly () {
                 [ "$WEEKEND" == "no" ] && result=`/bin/grep ^$HOUR $basedir/schedule/$kid | /usr/bin/awk '{ print $2 }'`
                 [ "$WEEKEND" == "yes" ] && result=`/bin/grep ^$HOUR $basedir/schedule/$kid | /usr/bin/awk '{ print $3 }'`
                 if [ "$result" == "y" ]; then
-                    /usr/bin/passwd $kid -u
+                    go_unlock_account $kid
                 else
-                    /usr/bin/passwd $kid -l
+                    go_lock_account $kid
 
                     # should gnome-screensaver-command -l
 
