@@ -348,8 +348,8 @@ play_sound () {
         SOUND_FILE="/usr/share/sounds/freedesktop/stereo/dialog-warning.oga"
     fi
 
-    if [ -n "$SOUND_PLAYER" ] && [ -n "$SOUND_FILE" ]; then
-        echo "/bin/su $user -c '$SOUND_PLAYER $SOUND_FILE &' 2>/dev/null" >> $TMPFILE
+    if [ -n "${SOUND_PLAYER}" ] && [ -n "${SOUND_FILE}" ]; then
+        echo "/bin/su $user -c '${SOUND_PLAYER} ${SOUND_FILE} &' 2>/dev/null" >> $TMPFILE
     fi
 }
 
@@ -396,12 +396,12 @@ go_send () {
 go_killall () {
     local user=$1
 
-    /bin/rm -f /tmp/killall.bash.$user
-    touch /tmp/killall.bash.$user
-    chmod +x /tmp/killall.bash.$user
+    /bin/rm -f /tmp/killall.bash.${user}
+    touch /tmp/killall.bash.${user}
+    chmod +x /tmp/killall.bash.${user}
     #/usr/bin/passwd $user -l
 
-    echo "#!/bin/bash" > /tmp/killall.bash.$user
+    echo "#!/bin/bash" > /tmp/killall.bash.${user}
     # Not sure if it is better or worse to do a normal kill first...
     # Programs like Firefox will reopen all their previous tabs if it is killed with -KILL
     # But other programs would probably do better if given a chance to save state/data and clean up after themselves eg open office???
