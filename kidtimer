@@ -619,21 +619,6 @@ check_dependencies () {
     fi
 }
 
-get_update () {
-    local URL='https://github.com/grover66/kidtimer/raw/master/DEBS/kidtimer_latest.deb'
-
-    if [ -e /usr/bin/wget ]; then
-        /usr/bin/wget "$URL" -qO /tmp/kidtimer_latest.deb
-        /usr/bin/dpkg -i /tmp/kidtimer_latest.deb
-        /bin/rm -f /tmp/kidtimer_latest.deb
-    else
-        echo
-        echo "Error. Requires wget"
-        echo "To install wget; sudo apt-get install wget"
-    fi
-}
-
-
 ###################### Code ####################
 ################################################
 
@@ -654,8 +639,6 @@ logout) go_logout $KID
 hourly) go_hourly
         ;;
 daily) go_daily
-        ;;
-update) get_update
         ;;
 check) go_check
         ;;
