@@ -259,9 +259,9 @@ go_logout () {
 
    # only start this if they are logged in
    /usr/bin/users | /bin/grep -q $kid
-    if [ $? -ne 0 ]; then
-	return
-    fi
+   if [ $? -ne 0 ]; then
+      return
+   fi
 
    # schedule the shutdown if we haven't already
    if [ ! -e /tmp/kidtimer.shutdown.$kid ]; then
@@ -273,6 +273,34 @@ go_logout () {
       go_killall $kid
       /usr/bin/touch /tmp/kidtimer.shutdown.$kid
    fi
+}
+
+
+play_sound () {
+user=$1
+TMPFILE=$2
+
+SOUND_PLAYER=""
+if [ -x /usr/bin/paplay ]; then
+    SOUND_PLAYER="/usr/bin/paplay"
+elif [ -x /usr/bin/pw-play ]; then
+    SOUND_PLAYER="/usr/bin/pw-play"
+elif [ -x /usr/bin/aplay ]; then
+    SOUND_PLAYER="/usr/bin/aplay"
+fi
+
+SOUND_FILE=""
+if [ -f /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"
+elif [ -f /usr/share/sounds/freedesktop/stereo/bell.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/bell.oga"
+elif [ -f /usr/share/sounds/freedesktop/stereo/dialog-warning.oga ]; then
+    SOUND_FILE="/usr/share/sounds/freedesktop/stereo/dialog-warning.oga"
+fi
+
+if [ -n "$SOUND_PLAYER" ] && [ -n "$SOUND_FILE" ]; then
+    echo "/bin/su $user -c '$SOUND_PLAYER $SOUND_FILE &' 2>/dev/null" >> $TMPFILE
+fi
 }
 
 
@@ -303,6 +331,8 @@ for (( D = 0 ; D < 10 ; D = D + 1 )); do
         echo "/bin/su $K -c 'DISPLAY=:$D /usr/bin/notify-send -i /usr/local/kidtimer/icons/kidtimer-$TEXT.png \
     \"ALERT\" \"$MSG\"'" >> $TMPFILE
 done
+
+play_sound $K $TMPFILE
 
 echo "/bin/rm -f $TMPFILE" >> $TMPFILE
 echo "/bin/bash $TMPFILE" | /usr/bin/at now + $T minutes
